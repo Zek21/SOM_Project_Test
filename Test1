@@ -1,0 +1,206 @@
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.model_selection import train_test_split
+from sklearn.datasets import load_wine  # Added this line to load the Wine dataset
+
+def sigmoid(x):
+    return 1 / (1 + np.exp(-x))
+
+def quickprop_update(weight, prev_weight_update, gradient, prev_gradient):
+    epsilon = 1e-9  # A small value to avoid division by zero
+    weight_update = (gradient * prev_gradient) / (prev_gradient - gradient + epsilon)
+    weight += weight_update.astype(float)  # Convert to float
+    return weight, weight_update
+
+def som_train(X):
+    som_size = 100
+    som = np.random.rand(som_size, som_size, X.shape[1])
+
+    for i in range(som_size):
+        for j in range(som_size):
+            bmu = np.argmin(np.linalg.norm(X - som[i, j], axis=1))
+            som[i, j] = X[bmu]
+
+    return som
+
+def som_predict(X, som, labels):
+    predictions = []
+    for sample in X:
+        bmu = np.argmin(np.linalg.norm(sample - som, axis=(1, 2)))
+        predictions.append(labels[bmu])
+    return np.array(predictions)
+def quickprop_train(X, y, learning_rate, iterations):
+    num_features = X.shape[1]
+    num_samples = X.shape[0]
+
+    # Initialize weights and previous weight updates
+    np.random.seed(10)
+    W1 = np.random.normal(scale=0.5, size=(num_features, 2))
+    W2 = np.random.normal(scale=0.5, size=(2, 2))
+    W3 = np.random.normal(scale=0.5, size=(2, 3))
+    prev_W1_update = np.zeros((num_features, 2))
+    prev_W2_update = np.zeros((2, 2))
+    prev_W3_update = np.zeros((2, 3))
+
+    train_loss = []
+    train_accuracy = []
+    
+    # Added these lines to split the data into training and validation sets
+    X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.2)
+    
+    # Added this line to initialize the best validation loss
+    best_val_loss = np.inf
+    
+    for itr in np.arange(1, iterations + 1):  # Adjusted the range for decimals
+        correct_predictions = 0
+        total_samples = 0
+
+        # Train the model on the training set
+        for i in range(X_train.shape[0]):
+            x_i = X_train[i]
+            y_i = y_train[i]
+
+            # Forward pass
+            z1_i = x_i.dot(W1)
+            a1_i = sigmoid(z1_i)
+            z2_i = a1_i.dot(W2)
+            a2_i = sigmoid(z2_i)
+            z3_i = a2_i.dot(W3)
+            a3_i = sigmoid(z3_i)
+
+            # Backward pass
+            delta3_i = a3_i - y_i
+            delta2_i = delta3_i.dot(W3.T) * a2_i * (1 - a2_i)
+            delta1_i = delta2_i.dot(W2.T) * a1_i * (1 - a1_i)
+
+            # Compute gradients
+            grad_W3 = a2_i.reshape(-1, 1).dot(delta3_i.reshape(1, -1))
+            grad_W2 = a1_i.reshape(-1, 1).dot(delta2_i.reshape(1, -1))
+            grad_W1 = x_i.reshape(-1, 1).dot(delta1_i.reshape(1, -1))
+
+            # Update weights using Quickprop
+            W3, prev_W3_update = quickprop_update(W3, prev_W3_update, grad_W3,
+                                                  learning_rate * delta3_i)
+            W2, prev_W2_update = quickprop_update(W2, prev_W2_update, grad_W2,
+                                                  learning_rate * delta2_i)
+            W1, prev_W1_update = quickprop_update(W1, prev_W1_update, grad_W1,
+                                                  learning_rate * delta1_i)
+
+            # Compute mean squared error for this sample and store it
+            mse = np.mean((a3_i - y_i) ** 2)
+            train_loss.append(mse)
+
+            # Compute prediction and accuracy for this sample and store it
+            prediction = np.argmax(a3_i)
+            if prediction == y_i:
+                correct_predictions += 1
+            total_samples += 1
+
+        # Calculate training accuracy for this iteration and store it
+        accuracy = correct_predictions / total_samples
+        train_accuracy.append(accuracy)
+
+        # Print the training loss and accuracy for each iteration
+        if itr % 100 == 0:
+            print(f"Iteration {itr}: Loss = {mse:.4f}, Accuracy = {accuracy:.4f}")
+
+        # Added these lines to evaluate the model on the validation set and implement early stopping
+        val_loss, val_accuracy = evaluate(X_val, y_val, W1, W2, W3)
+        
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            best_weights = (W1.copy(), W2.copy(), W3.copy())  # Save the best weights so far
+        else:
+            print(f"Validation loss stopped decreasing at iteration {itr}.")
+            break
+        
+        # Added this line to implement learning rate decay every 100 iterations
+        if itr % 100 == 0:
+            learning_rate *= 0.9
+
+    # Plot the training loss and training accuracy over iterations
+    plt.figure(figsize=(12, 4))
+    plt.subplot(1, 2, 1)
+    plt.plot(train_loss)
+    plt.xlabel("Iteration")
+    plt.ylabel("Loss")
+    plt.title("Training Loss")
+
+    plt.subplot(1, 2, 2)
+    plt.plot(train_accuracy)
+    plt.xlabel("Iteration")
+    plt.ylabel("Accuracy")
+    plt.title("Training Accuracy")
+
+    plt.show()
+
+    return best_weights  # Return the best weights
+
+def evaluate(X, y, W1, W2, W3):  # Added this function to evaluate the model on a given dataset
+    correct_predictions = 0
+    total_samples = 0
+    loss = 0
+    
+    for i in range(X.shape[0]):
+        x_i = X[i]
+        y_i = y[i]
+
+        # Forward pass
+        z1_i = x_i.dot(W1)
+        a1_i = sigmoid(z1_i)
+        z2_i = a1_i.dot(W2)
+        a2_i = sigmoid(z2_i)
+        z3_i = a2_i.dot(W3)
+        a3_i = sigmoid(z3_i)
+
+        # Compute mean squared error for this sample and accumulate it
+        mse = np.mean((a3_i - y_i) ** 2)
+        loss += mse
+
+        # Compute prediction and accuracy for this sample and accumulate it
+        prediction = np.argmax(a3_i)
+        if prediction == y_i:
+            correct_predictions += 1
+        total_samples += 1
+
+    # Calculate average
+    
+def main():
+    # Load the Wine dataset
+    wine = load_wine()
+    X = wine.data
+    y = wine.target
+
+    # Normalize the features
+    X = (X - X.mean(axis=0)) / X.std(axis=0)
+
+    # Convert the labels to one-hot encoding
+    y = np.eye(3)[y]
+
+    # Train the model using Quickprop
+    learning_rate = 0.01
+    iterations = 1000
+    W1, W2, W3 = quickprop_train(X, y, learning_rate, iterations)
+
+    # Evaluate the model on the whole dataset
+    loss, accuracy = evaluate(X, y, W1, W2, W3)
+    print(f"Final Loss = {loss:.4f}, Final Accuracy = {accuracy:.4f}")
+
+    # Train a self-organizing map using the features
+    som = som_train(X)
+
+    # Predict the labels using the self-organizing map
+    som_predictions = som_predict(X, som, wine.target_names)
+
+    # Plot the self-organizing map with labels
+    plt.figure(figsize=(10, 10))
+    plt.imshow(som_predictions.reshape(100, 100), cmap="tab10")
+    plt.title("Self-Organizing Map with Labels")
+    plt.show()
+
+    if __name__ == "__main__":
+        main()
